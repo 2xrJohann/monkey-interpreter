@@ -639,131 +639,6 @@ let rec skip_till_semicolon_next parser =
   then skip_till_semicolon_next (parse_next parser)
   else parser 
 
-  (* there are 56 expressions in here *)
-let input = "
-let x = 5;
-
-let y = 10;
-
-let foobar = add(5, 5);
-
-let barfoo = 5 * 5 / 10 + 18 - add(5, 5) + multiply(124);
-
-let anotherName = barfoo;
-
-let foobar = if (x > y) { x } else { y };
-
-let myFunction = fn(x, y) { return x + y; } 
-
-let add = fn(a, b) { return a + b; };
-
-let barfoo = 5 * 5 / 10 + 18 - add(5, 5) + multiply(124);
-
-let anotherName = barfoo;
-
-let result = if (10 > 5) { true } else { false };
-
-return 5;
-
-return 10;
-
-return add(15);
-
-5 * 5 + 10;
-
-((5 * 5) + 10);
-
-5 - 10;
-
-5 * (add(2, 3) + 10);
-
-((3 + (4 * 5)) == ((3 * 1) + (4 * 5)));
-
-3 + 4 * 5 == 3 * 1 + 4 * 5;
-
-((3 + (4 * 5)) == ((3 * 1) + (4 * 5)));
-
-3 + 4 * 5 == 3 * 1 + 4 * 5;
-
-((5 < 4) != (3 > 4));
-
-5 < 4 != 3 > 4;
-
-(!(true == true));
-
-!(true == true);
-
-(-(5 + 5));
-
-((a + add((b * c))) + d);
-
-a + add(b * c) + d;
-
-!true;
-
-!false;
-
-foo == bar;
-
-foo != bar;
-
-foo < bar;
-
-foo > bar;
-
-5 + 5;
-
-5 - 5;
-
-5 * 5;
-
-5 / 5;
-
-5 > 5;
-
-5 < 5;
-
-5 == 5;
-
-5 != 5;
-
-add(2, 3);
-
-add(add(2, 3), add(5, 10));
-
-max(5, add(5, (5 * 5)));
-
-if (x > y) { return x; } else { return y; }
-
-if (x > y) { return x; }
-
-fn() { return fn(x, y) { return x > y; }; }
-
-myFunc(x, y, fn(x, y) { return x > y; });
-
-fn(x, y) { x + y; }(2, 3);
-
-callsFunction(2, 3, fn(x, y) { x + y; });
-
-add(a, b, 1, 2 * 3, 4 + 5, add(6, 7 * 8));
-
-add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)));
-
-add(a + b + c * d / f + g);
-
-add((((a + b) + ((c * d) / f)) + g));
-"
-
-
-(* let () = let lexer = init_lexer input in
- let p = init_parser lexer in
- let p = build_parse_fns p in
- _dump_tokens p *)
-
-(* let input = "
-let foobar = if (x > y) { x } else { y };
-" *)
-
 let rec pretty_print_node node =
   match node with
   | Program program -> pretty_print_program program
@@ -830,48 +705,6 @@ and pretty_print_program program =
   let statements_str = List.map pretty_print_statement program in
   String.concat "\n" statements_str
 
-(* let () =
-  let lexer = init_lexer input in
-  let parser = init_parser lexer in
-  let parser = build_parse_fns parser in
-  let statements = parse_program parser in
-  print_endline"";
-  print_endline ("STATEMENTS: " ^ string_of_int (List.length statements));
-    let program_str = pretty_print_program statements in
-  print_endline program_str; *)
-
-(*  let rec process_input () =
-  print_string "🐒 >> ";
-  flush stdout;
-  let input = read_line () in
-  if input = "exit" then
-    ()
-  else
-    let lexer = init_lexer input in
-    let parser = init_parser lexer in
-    let parser = build_parse_fns parser in
-    let statements = parse_program parser in
-    let program_str = pretty_print_program (List.rev statements) in
-    print_endline program_str;
-    process_input ()
-
-let () =
-  print_endline "
-                .-.  
-               /  /
-              /. /
-     )       /c\\/
-      (     /'\\/
-     )     /  /
-    (     /  /
-     )   /  /
-      ( /. /
-       .`.'.
-       `'``
-       
-  ";
-  process_input () *)
-
 type obj =
   | Integer of int
   | Boolean of bool
@@ -929,13 +762,6 @@ let rec stringOfObj obj =
     | Assign -> "Assign"
     | Error x -> x  
     | Function _ -> "Function"
-
-(* let rec eval node =
-  match node with
-  | Program stmts -> evalStatements stmts (* evalStatements *)
-  | Statement stmt -> evalStatement stmt  (* evalStatement *)
-  | Expression exp -> evalExpression exp
-  | EOT -> Empty *)
 
 let rec evalStatement stmt env = 
   match stmt with
