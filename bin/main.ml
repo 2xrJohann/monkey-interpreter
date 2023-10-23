@@ -1,3 +1,5 @@
+exception InvalidToken of string;;
+
 type token_type =
   | ILLEGAL of string
   | EOF
@@ -5,14 +7,17 @@ type token_type =
   | IDENT of string
   | ASSIGN
   | INT of int
+  | STRING of string
   | FUNCTION
   | PLUS
   | COMMA
   | SEMICOLON
-  | LBRACE
-  | RBRACE
-  | LPAREN
-  | RPAREN
+  | LBRACE (* { *)
+  | RBRACE (* } *)
+  | LPAREN (* ( *)
+  | RPAREN (* ) *)
+  | RBRACK (* ] *)
+  | LBRACK (* [ *)
   | GT
   | LT
   | MINUS
@@ -85,6 +90,18 @@ let rec eat lexer = match lexer.ch with
 let is_digit = function '0' .. '9' -> true | _ -> false 
 let is_alpha = function | '_' | 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false
 
+let rec read_string lexer =
+  let lexer = advance lexer in
+  let rec aux lexer acc =
+    match lexer.ch with
+    | None -> raise (InvalidToken "Expected end of string")
+    | Some x -> (
+      match x with
+      | '"' -> advance lexer, STRING (String.of_seq (List.to_seq (List.rev acc)))
+      | x -> aux (advance lexer) (x::acc)
+    )
+  in aux lexer []
+
 let rec read_identifier lexer acc = match lexer.ch with 
   | None -> lexer, acc
   | Some x -> if is_alpha x
@@ -126,7 +143,10 @@ let next_token lexer =
     | '<' -> advance lexer, LT
     | '-' -> advance lexer, MINUS
     | '/' -> advance lexer, SLASH
-    | '*' -> advance lexer, ASTERISK
+    | '*' -> advance lexer, ASTERISK 
+    | '[' -> advance lexer, LBRACK
+    | ']' -> advance lexer, RBRACK
+    | '"' -> read_string lexer
     | '!' -> insepctor_exclaimation (advance lexer)
     | '=' -> inspector_equals (advance lexer)
     | x when is_alpha x -> let (l, tok) = read_identifier lexer "" in l, lookup tok
@@ -162,6 +182,9 @@ let _print_token token = match token with
 | FALSE -> "FALSE"
 | EQUAL -> "EQUAL"
 | NOTEQUAL -> "NOTEQUAL"
+| STRING x -> "STRING(\"" ^ x ^ "\")"
+| LBRACK -> "LBRACK"
+| RBRACK -> "RBRACK"
 ;;
 
 let string_of_token token_type = match token_type with 
@@ -192,6 +215,9 @@ let string_of_token token_type = match token_type with
   | FALSE -> "FALSE"
   | EQUAL -> "EQUAL"
   | NOTEQUAL -> "NOTEQUAL"
+  | STRING _ -> "STRING"
+  | LBRACK -> "LBRACK"
+  | RBRACK -> "RBRACK"
 ;;
 
 let rec _print_tokens lexer =
@@ -226,11 +252,12 @@ let rec _print_tokens lexer =
       | FALSE -> "FALSE"
       | EQUAL -> "EQUAL"
       | NOTEQUAL -> "NOTEQUAL"
+      | STRING x -> x
+      | LBRACK -> "LBRACK"
+      | RBRACK -> "RBRACK"
     );
     _print_tokens lexer
 ;;
-
-exception InvalidToken of string;;
 
 type integer = {token: token_type; value : int;}
 type identifier = {token: token_type ; value: string;}
@@ -258,6 +285,7 @@ and statement =
  | Return of {token: token_type; expression: expression;}
  | ExpressionStatement of {expression: expression;}
 and expression =
+ | String of {token: token_type ; value : string}
  | Identifier of identifier
  | Integer of integer
  | Boolean of boolean
@@ -266,6 +294,8 @@ and expression =
  | PrefixExpression of {token: token_type ; operator : string ; right : expression;}
  | InfixExpression of {token: token_type ; operator : string ; left : expression ; right : expression;}
  | CallExpression of {token: token_type ; fn: expression ; arguments : expression list}
+ | Array of {token: token_type ; elements : expression list}
+ | IndexExpression of {token: token_type ; left : expression ; index : expression}
  and program = statement list
 and block_statement = {token: token_type; statements: statement list}
 and if_expression = {token: token_type; condition: expression ; consequence: block_statement; alternative : block_statement option}
@@ -291,7 +321,8 @@ type order =
   | SUM 
   | PRODUCT 
   | PREFIX 
-  | CALL [@@deriving enum] 
+  | CALL
+  | INDEX [@@deriving enum] 
 ;;
 
 let order_to_string order = 
@@ -303,6 +334,7 @@ let order_to_string order =
 | PRODUCT -> "PRODUCT"
 | PREFIX -> "PREFIX"
 | CALL-> "CALL"
+| INDEX -> "INDEX"
 
 let token_to_order token =
   match token with
@@ -315,6 +347,7 @@ let token_to_order token =
   | SLASH -> PRODUCT
   | ASTERISK -> PRODUCT
   | LPAREN -> CALL
+  | LBRACK -> INDEX
   | _ -> LOWEST
 
 let order_to_enum order = match order with
@@ -325,6 +358,7 @@ let order_to_enum order = match order with
   | PRODUCT -> 4
   | PREFIX -> 5
   | CALL -> 6
+  | INDEX -> 7
   
 let add_prefix_fn parser token fn = 
   Hashtbl.add parser.prefixParseFns token fn
@@ -347,6 +381,8 @@ let rec build_parse_fns parser =
   add_prefix_fn parser "LPAREN" parse_grouped_expression;
   add_prefix_fn parser "IF" parse_if_expression;
   add_prefix_fn parser "FUNCTION" parse_function_literal;
+  add_prefix_fn parser "STRING" parse_string_literal;
+  add_prefix_fn parser "LBRACK" parse_array_literal;
   add_infix_fn parser "PLUS" parse_infix_expression;
   add_infix_fn parser "MINUS" parse_infix_expression;
   add_infix_fn parser "SLASH" parse_infix_expression;
@@ -356,7 +392,9 @@ let rec build_parse_fns parser =
   add_infix_fn parser "LT" parse_infix_expression;
   add_infix_fn parser "GT" parse_infix_expression;
   add_infix_fn parser "LPAREN" parse_call_expression;
+  add_infix_fn parser "LBRACK" parse_index_expression;
   parser
+
 and
 parse_identifier parser =
   let parser, identifier = _build_ident parser in
@@ -364,11 +402,13 @@ parse_identifier parser =
 
 and _build_ident parser =
  parser, { token = parser.current ; value = parse_ident parser } 
+
 and
 parse_ident parser = 
   match parser.current with
   | IDENT x -> x
   | _ -> raise (InvalidToken ("expected string, got: "^ _print_token parser.current))
+
 and
 parse_int parser = 
   match parser.current with
@@ -376,8 +416,15 @@ parse_int parser =
   | _ -> raise (InvalidToken "expected int")
 
 and
+parse_string_literal parser =
+  match parser.current with
+  | STRING x -> parser, String {token = parser.current ; value = x}
+  | _ -> raise (InvalidToken "expected string")
+
+and
 parse_integer parser =
   parser, Integer { token = parser.current ; value = parse_int parser }
+
 and
 _dump_tokens parser = 
   print_endline(_print_token parser.current);
@@ -400,6 +447,14 @@ and parse_infix_expression parser left =
   let ap = parse_next parser in
   let ap, right = p_e ap order in
   ap, InfixExpression {token = parser.current ; operator = string_of_token parser.current ; left ; right }
+
+and parse_index_expression parser left =
+  let next = parse_next parser in
+  let next, idx = p_e next LOWEST in
+  let next, assertion = expect_peek next "RBRACK" in
+  match assertion with
+  | true -> next, IndexExpression {token = parser.current ; left = left ; index = idx}
+  | false -> raise (InvalidToken "Expected RBRACK")
 
 and p_e parser order =
   let prefixFnOption = findPrefixFn parser in 
@@ -599,6 +654,25 @@ and walk parser acc =
     let parser, expression = p_e parser LOWEST in
     walk parser (expression::acc)
 
+and parse_array_literal parser =
+  if parser.next == RBRACK
+  then parse_next parser, Array { token = parser.current ; elements = []}
+  else let parser = parse_next parser in
+  let parser, left = p_e parser LOWEST in
+  let parser, stmts = walk parser (left::[]) in
+  if current_token_is parser "SEMICOLON"
+  then parse_next parser, Array { token = parser.current ; elements = stmts}
+  else let rBrack =
+    current_token_is parser "RBRACK" 
+   || peek_token_is parser "RBRACK"
+   || peek_token_is parser "EOF" 
+   || peek_token_is parser "SEMICOLON" in
+  match rBrack with
+  | false ->
+    raise (InvalidToken ("expected RBRACK, got: "^_print_token parser.next))
+  | true -> let parser = parse_next parser in
+    parser, Array { token = parser.current ; elements = stmts}
+
 and parse_call_expression og_parser fn =
   if og_parser.next == RPAREN
   then parse_next og_parser, CallExpression {token = og_parser.current ; fn ; arguments = []}
@@ -657,6 +731,7 @@ and pretty_print_statement statement =
 
 and pretty_print_expression expression =
   match expression with
+  | String {token ; value } -> value
   | Identifier { value; _ } -> value
   | Integer { value; _ } -> string_of_int value
   | Boolean {value ; _} -> string_of_bool value
@@ -696,6 +771,8 @@ and pretty_print_expression expression =
     let arguments_str = List.map pretty_print_expression arguments in
     let arguments = String.concat ", " arguments_str in
     Printf.sprintf "%s(%s)" fn_str arguments
+  | Array {token ; elements} -> "Array temp print"
+   |IndexExpression {token: token_type ; left : expression ; index : expression} -> "IndexExpression temp print"
 
 and pretty_print_block_statement block_statement =
   let statements_str = List.map pretty_print_statement block_statement.statements in
@@ -705,10 +782,15 @@ and pretty_print_program program =
   let statements_str = List.map pretty_print_statement program in
   String.concat "\n" statements_str
 
-type obj =
+type builtInFn = obj list -> obj
+
+and obj =
   | Integer of int
   | Boolean of bool
+  | String of string
   | Return of obj
+  | BuiltIn of  builtInFn
+  | Array of obj list
   | Function of {parameters : identifier list ; body : block_statement ; env : environment}
   | Error of string
   | Assign
@@ -716,12 +798,79 @@ type obj =
   | Empty
 and environment = {env : (string, obj) Hashtbl.t ; outer : environment option}
 
-let rec envGet environment k =
+let rec printObj obj =
+  match obj with
+  | Integer x -> print_endline(string_of_int x)
+  | Boolean x -> print_endline(string_of_bool x)
+  | String x -> print_endline("\"" ^ x ^ "\"")
+  | Return x -> printObj x
+  | Null -> print_endline "Null"
+  | Empty -> print_endline "Empty"
+  | Function _ -> print_endline ""
+  | Assign -> print_endline ""
+  | Error x -> print_endline x
+  | BuiltIn x -> print_endline ""
+  | Array x -> print_endline (printArrayObj x "[")
+
+and
+printArrayObj arr acc =
+  match arr with
+  | [] -> acc ^ "]"
+  | h :: [] -> acc ^ stringOfObj h ^ "]"
+  | h :: t -> printArrayObj t (acc ^ (stringOfObj h ^ ","))
+
+and stringOfObjVariant obj =
+  match obj with
+  | Integer _ -> "Integer"
+  | Boolean _ -> "Boolean"
+  | String _ -> "String"
+  | Return _ -> "Return"
+  | Null -> "Null"
+  | Empty ->  "Empty"
+  | Error _ -> "Error" 
+  | Assign -> "Assign"
+  | Function _ -> "Function"
+  | BuiltIn _ -> "BuiltIn"
+  | Array _ -> "Array"
+
+and stringOfObj obj =
+    match obj with
+    | Integer x -> string_of_int x
+    | Boolean x -> string_of_bool x
+    | String x -> x
+    | Return x -> stringOfObj x
+    | Null -> "Null"
+    | Empty ->  "Empty"
+    | Assign -> "Assign"
+    | Error x -> x  
+    | Function _ -> "Function"
+    | BuiltIn _ -> "BuiltIn"
+    | Array _ -> "Array"
+
+let built_in_len t =
+  match t with
+  | [x] -> 
+    (match x with 
+    | String x -> Integer (String.length x)
+    | Array x -> Integer (List.length x)
+    | _ -> Error ("cannot perform len on: " ^ stringOfObjVariant x)
+    )
+  | _ -> Error ("invalid arg count: " ^ string_of_int (List.length t))
+
+let build_built_ints  =
+  let (builtIns : (string, obj) Hashtbl.t) = Hashtbl.create 1 in
+  Hashtbl.add builtIns "len" (BuiltIn built_in_len);
+  builtIns 
+
+let rec envGet environment k builtIns =
    match Hashtbl.find_opt environment.env k with
   | Some x -> x
   | None -> match environment.outer with
-    | Some x -> envGet x k
-    | None -> Error ("unknown identifier")
+    | Some x -> envGet x k builtIns
+    | None -> (* Error ("unknown identifier") *)
+    (match Hashtbl.find_opt builtIns k with
+    | Some x -> x
+    | None -> Error ("unknown identifier"))
 
 let newClosedEnv outer = {env = Hashtbl.create 0 ; outer }
 let evalError input = Error input
@@ -730,70 +879,37 @@ let isError obj = match obj with
   | Error _ -> true
   | _ -> false
 
-let rec printObj obj =
-  match obj with
-  | Integer x -> print_endline(string_of_int x)
-  | Boolean x -> print_endline(string_of_bool x)
-  | Return x -> printObj x
-  | Null -> print_endline "Null"
-  | Empty -> print_endline "Empty"
-  | Function _ -> print_endline ""
-  | Assign -> print_endline ""
-  | Error x -> print_endline x
-
-let stringOfObjVariant obj =
-  match obj with
-  | Integer _ -> "Integer"
-  | Boolean _ -> "Boolean"
-  | Return _ -> "Return"
-  | Null -> "Null"
-  | Empty ->  "Empty"
-  | Error _ -> "Error" 
-  | Assign -> "Assign"
-  | Function _ -> "Function"
-
-let rec stringOfObj obj =
-    match obj with
-    | Integer x -> string_of_int x
-    | Boolean x -> string_of_bool x
-    | Return x -> stringOfObj x
-    | Null -> "Null"
-    | Empty ->  "Empty"
-    | Assign -> "Assign"
-    | Error x -> x  
-    | Function _ -> "Function"
-
-let rec evalStatement stmt env = 
+let rec evalStatement stmt env builtIns = 
   match stmt with
   | Let {token ; name ; value} -> 
-    let obj, env = evalExpression value env in
+    let obj, env = evalExpression value env builtIns in
     if isError obj
     then obj, env
     else let _ = Hashtbl.add env.env name.value obj in Assign, env
   | Return {token ; expression} -> 
-    let evaluatedExpression, env = evalExpression expression env in
+    let evaluatedExpression, env = evalExpression expression env builtIns in
     if isError evaluatedExpression then evaluatedExpression, env else
     Return evaluatedExpression, env
-  | ExpressionStatement {expression} -> evalExpression expression env
+  | ExpressionStatement {expression} -> evalExpression expression env builtIns
 
-and evalStatements stmts env =
-  let rec aux stmts obj env =
+and evalStatements stmts env builtIns =
+  let rec aux stmts obj env builtIns =
     match stmts with
     | [] -> obj, env
-    | h :: [] -> evalStatement h env
+    | h :: [] -> evalStatement h env builtIns
     | h :: t ->
-      let o, env = evalStatement h env in
+      let o, env = evalStatement h env builtIns in
       match o with
       | Error _ | Return _ -> o, env
-      | _ -> aux t o env
-  in aux stmts Null env
+      | _ -> aux t o env builtIns
+  in aux stmts Null env builtIns
 
-and evalExpressions exps env = 
+and evalExpressions exps env builtIns = 
   let rec aux exps acc env =
     match exps with
     | [] -> List.rev acc, env
-    | h :: [] -> let exp, env = evalExpression h env in List.rev (exp::acc), env
-    | h :: t -> let exp, env = evalExpression h env in aux t (exp::acc) env
+    | h :: [] -> let exp, env = evalExpression h env builtIns in List.rev (exp::acc), env
+    | h :: t -> let exp, env = evalExpression h env builtIns in aux t (exp::acc) env
   in aux exps [] env
 
 and checkEvalExpressionsErrors exps =
@@ -804,48 +920,74 @@ and checkEvalExpressionsErrors exps =
     | h :: t -> if isError h then Some(h), exps else aux t
   in aux exps
 
-and evalExpression exp env =
+and evalExpression exp env builtIns =
   match exp with
   | Integer {token; value} -> Integer value, env
   | Boolean {token; value} -> Boolean value, env
+  | String {token ; value} -> String value, env
   | PrefixExpression {token; operator; right} ->
-      let r, env = evalExpression right env in
+      let r, env = evalExpression right env builtIns in
       if isError r then r, env else evalPrefixExp operator r, env
   | InfixExpression {token; operator; left; right} ->
-      let r, env = evalExpression right env in
+      let r, env = evalExpression right env builtIns in
       if isError r then r, env else
-      let l, env = evalExpression left env in
+      let l, env = evalExpression left env builtIns in
       if isError l then l, env else
       evalInfixExp operator l r, env
   | If {token; condition; consequence; alternative} ->
-     evalIfExpression condition consequence alternative env
+     evalIfExpression condition consequence alternative env builtIns
   | Identifier {token ; value} -> 
-    envGet env value, env
+    envGet env value builtIns, env
   | Function {token ; parameters ; body} ->
      Function {parameters ; body ; env}, env
   | CallExpression {token ; fn ; arguments} ->
-    let fn, env = evalExpression fn env in
+    let fn, env = evalExpression fn env builtIns in
     if isError fn
     then fn, env else
-    let args, env = evalExpressions arguments env in
+    let args, env = evalExpressions arguments env builtIns in
     let err, args = checkEvalExpressionsErrors args in
     (
       match err with
       | Some err -> err, env
-      | None -> applyFunction fn args env
+      | None -> applyFunction fn args env builtIns
     )
+  | Array {token ; elements} ->
+    let elems, env = evalExpressions elements env builtIns in
+    let err, args = checkEvalExpressionsErrors elems in
+    (
+      match err with
+      | Some err -> err, env
+      | None -> Array elems, env
+    )
+  | IndexExpression {token ; left ; index} ->
+    let left, env = evalExpression left env builtIns in
+    if isError left then left, env else
+    let idx, env = evalExpression index env builtIns in
+    if isError idx then idx, env else
+    evalIndexExpression left idx env
 
-and applyFunction fn args env =
-  if stringOfObjVariant fn != "Function" then
-  Error "Expected function", env
-  else extendFunctionEnv fn args, env
+and evalIndexExpression left index env =
+  match left, index with
+  | Array x, Integer y -> evalArrayIndexExpression x y, env
+  | _ -> Error "Expected array, int", env
 
-and extendFunctionEnv fn args =
+and evalArrayIndexExpression arr index =
+  let length = List.length arr in
+  if length - 1 < index then Error "index greater than array boundary"
+  else List.nth arr index
+
+and applyFunction fn args env builtIns =
+  match fn with
+  | Function { env ; body ; parameters} -> extendFunctionEnv fn args builtIns, env
+  | BuiltIn fn -> fn args, env
+  | _ -> Error "Expected function", env
+
+and extendFunctionEnv fn args builtIns =
   match fn with
   | Function {parameters ; body ; env} -> 
     let extendedEnv = newClosedEnv (Some env) in
     let extendedEnv = setExtendedEnv extendedEnv parameters args in
-    runFn fn extendedEnv
+    runFn fn extendedEnv builtIns
   | _ -> raise (InvalidToken "Expected function")
 
 and setExtendedEnv env params args =
@@ -862,10 +1004,10 @@ and setExtendedEnv env params args =
       aux env t (List.tl args)
   in aux env params args
 
-and runFn fn extendedEnv =
+and runFn fn extendedEnv builtIns =
   match fn with
   | Function {parameters ; body ; env} ->
-    let evaluated, _ = evalStatements body.statements extendedEnv in
+    let evaluated, _ = evalStatements body.statements extendedEnv builtIns in
     unwrapReturn evaluated
   | _ -> raise (InvalidToken "Expected function")
 
@@ -876,6 +1018,7 @@ and unwrapReturn stmt = match stmt with
 and evalInfixExp operator left right =
   match (left, right) with
   | Integer x, Integer y -> evalIntegerInfixExp operator x y 
+  | String x, String y -> evalStringInfixExp operator x y
   | Boolean _, Boolean _ -> (
     match operator with
     | "EQUAL" -> Boolean (left = right)
@@ -884,11 +1027,18 @@ and evalInfixExp operator left right =
   )
   | _ -> evalError ("type missmatch for "^stringOfObjVariant left^" "^operator ^" "^stringOfObjVariant right)
 
+and evalStringInfixExp operator x y =
+  match operator with
+  | "PLUS" -> String (x ^ y)
+  | "EQUAL" -> Boolean (x = y)
+  | "NOTEQUAL" -> Boolean (x <> y)
+  | _ -> evalError ("unknown operator: "^operator^ " for "^ x ^ " and " ^ y)
+
 and evalIntegerInfixExp op x y =
   match op with
   | "MINUS" -> Integer (x - y)
   | "PLUS" -> Integer (x + y)
-  | "ASTERISK" -> print_endline ("x: "^string_of_int x ^" y: "^string_of_int y);Integer (x * y)
+  | "ASTERISK" -> Integer (x * y)
   | "SLASH" -> Integer (x / y)
   | "LT" -> Boolean (x < y)
   | "GT" -> Boolean (x > y)
@@ -914,13 +1064,13 @@ and evalMinusOperatorExpression right =
   | Integer x -> Integer (-x)
   | _ -> evalError ("unknown operator - for: " ^ stringOfObj right)
 
-and evalIfExpression condition consequence alternative env =
-  let cond, env = evalExpression condition env in
+and evalIfExpression condition consequence alternative env builtIns =
+  let cond, env = evalExpression condition env builtIns in
   if isError cond then cond, env else
   if isTruthy cond
-  then evalStatements consequence.statements env
+  then evalStatements consequence.statements env builtIns
   else match alternative with
-  | Some x -> evalStatements x.statements env
+  | Some x -> evalStatements x.statements env builtIns
   | None -> Null, env
   
 and isTruthy obj =
@@ -943,8 +1093,7 @@ and isTruthy obj =
 
 
 let start = 
-  print_endline "
-  ▄▄▄▄    ██░ ██  ▒█████   ██▓███  
+  print_endline "  ▄▄▄▄    ██░ ██  ▒█████   ██▓███  
   ▓█████▄ ▓██░ ██▒▒██▒  ██▒▓██░  ██▒
   ▒██▒ ▄██▒██▀▀██░▒██░  ██▒▓██░ ██▓▒
   ▒██░█▀  ░▓█ ░██ ▒██   ██░▒██▄█▓▒ ▒
@@ -969,7 +1118,8 @@ let start =
     (* _dump_tokens parser; *)
     let parser = build_parse_fns parser in
     let statements = parse_program parser in
-    let obj, env = evalStatements statements env in
+    let builtIns = build_built_ints in
+    let obj, env = evalStatements statements env builtIns in
     printObj obj;
 (*     let str = pretty_print_statement statement in
     print_endline str; *)
