@@ -857,9 +857,22 @@ let built_in_len t =
     )
   | _ -> Error ("invalid arg count: " ^ string_of_int (List.length t))
 
+and built_in_first t =
+  match t with
+  | [x] -> (
+    (
+      match x with
+      | Array x ->
+        if List.length x < 1 then Error ("array is empty") else List.hd x
+      | _ -> Error ("cannot perform first on: " ^ stringOfObjVariant x)
+    )
+  )
+  | _ -> Error ("invalid arg count: " ^ string_of_int (List.length t))
+
 let build_built_ints  =
   let (builtIns : (string, obj) Hashtbl.t) = Hashtbl.create 1 in
   Hashtbl.add builtIns "len" (BuiltIn built_in_len);
+  Hashtbl.add builtIns "first" (BuiltIn built_in_first);
   builtIns 
 
 let rec envGet environment k builtIns =
