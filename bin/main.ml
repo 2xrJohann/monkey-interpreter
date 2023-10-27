@@ -847,7 +847,7 @@ and stringOfObj obj =
     | BuiltIn _ -> "BuiltIn"
     | Array _ -> "Array"
 
-let built_in_len t =
+let rec built_in_len t =
   match t with
   | [x] -> 
     (match x with 
@@ -869,10 +869,53 @@ and built_in_first t =
   )
   | _ -> Error ("invalid arg count: " ^ string_of_int (List.length t))
 
+and built_in_last t =
+  match t with
+  | [x] -> (
+    (
+      match x with
+      | Array x ->
+        if List.length x < 1 then Error ("array is empty") else let y = List.rev x in List.hd y
+      | _ -> Error ("cannot perform first on: " ^ stringOfObjVariant x)
+    )
+  )
+  | _ -> Error ("invalid arg count: " ^ string_of_int (List.length t))
+
+and built_in_tail t =
+  match t with
+  | [x] -> (
+    (
+      match x with
+      | Array x ->
+        if List.length x < 1 then Array [] else Array (List.tl x)
+      | _ -> Error ("cannot perform tail on: " ^ stringOfObjVariant x)
+    )
+  )
+  | _ -> Error ("invalid arg count: " ^ string_of_int (List.length t))
+
+and built_in_push t =
+  match t with
+  | [] ->Error ("invalid arg count: " ^ string_of_int (List.length t))
+  | [x] -> Error ("invalid arg count: " ^ string_of_int (List.length t))
+  | h :: t -> (
+    match h with
+    | Array x -> let revList = List.rev x in
+      Array (appendElems revList t)
+    | _ -> Error ("cannot perform push on: " ^ stringOfObjVariant h)
+  )
+and appendElems arr elems =
+  match elems with
+  | [] -> List.rev arr
+  | [x] -> List.rev (x::arr)
+  | h::t -> appendElems (h::arr) t
+
 let build_built_ints  =
   let (builtIns : (string, obj) Hashtbl.t) = Hashtbl.create 1 in
   Hashtbl.add builtIns "len" (BuiltIn built_in_len);
   Hashtbl.add builtIns "first" (BuiltIn built_in_first);
+  Hashtbl.add builtIns "last" (BuiltIn built_in_last);
+  Hashtbl.add builtIns "tail" (BuiltIn built_in_tail);
+  Hashtbl.add builtIns "push" (BuiltIn built_in_push);
   builtIns 
 
 let rec envGet environment k builtIns =
